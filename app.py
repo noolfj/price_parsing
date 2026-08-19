@@ -60,15 +60,19 @@ def parse_alifshop(cat_slug, c_id):
     return products
 
 def parse_tajmobile():
-    base_url = "https://tajmobile.tj/index.php?route=product/catalog&page={}"
+    # ВНИМАНИЕ: Замените path=20 на ваш ID категории смартфонов на Tajmobile!
+    base_url = "https://tajmobile.tj/index.php?route=product/category&path=20&page={}"
     headers = {"user-agent": "Mozilla/5.0", "x-requested-with": "XMLHttpRequest"}
     products = []
-    for page in range(1, 10): # Парсим 10 страниц
+    
+    for page in range(1, 15):
         resp = requests.get(base_url.format(page), headers=headers)
         if resp.status_code != 200: break
+        
         soup = BeautifulSoup(resp.text, 'lxml')
         items = soup.select('.product-thumb') or soup.select('.product-layout')
         if not items: break
+            
         for item in items:
             name_tag = item.select_one('.caption h4 a') or item.select_one('.name a')
             price_tag = item.select_one('.price .price-new') or item.select_one('.price')
@@ -87,15 +91,38 @@ def parse_obbo():
     auth = ("firdavsjuraev8@gmail.com", "a9b5NgNa33h3jn2z04t1cR706zyb4B73")
     headers = {"User-Agent": "Mozilla/5.0"}
     products = []
+    
+    # Шаг 1: Ищем ID категории "Смартфоны" через API категорий
+    cat_url = "https://obbo.tj/api/categories?status=A&items_per_page=100"
+    cat_resp = requests.get(cat_url, auth=auth, headers=headers, verify=False)
+    cat_id = None
+    if cat_resp.status_code == 200:
+        categories = cat_resp.json().get("categories", [])
+        if isinstance(categories, dict):
+            categories = list(categories.values())
+        for cat in categories:
+            if "смартфон" in cat.get("category", "").lower():
+                cat_id = cat.get("category_id")
+                break
+
+    if not cat_id:
+        print("Не удалось найти категорию Смартфоны на Obbo!")
+        return products
+
+    # Шаг 2: Парсим товары с фильтром по категории (cid)
     page = 1
     while True:
-        params = {"status": "A", "items_per_page": 100, "page": page}
+        # Добавлен параметр cid=cat_id
+        params = {"status": "A", "items_per_page": 100, "page": page, "cid": cat_id}
         response = requests.get(api_url, auth=auth, headers=headers, params=params, verify=False)
+        
         if response.status_code != 200: break
+            
         data = response.json()
         items = data.get("products", [])
         if isinstance(items, dict): items = list(items.values())
         if not items: break
+            
         for item in items:
             products.append({
                 "Магазин": "Obbo",
