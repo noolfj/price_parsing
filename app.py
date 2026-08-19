@@ -61,7 +61,7 @@ def parse_alifshop(cat_slug, c_id):
 
 def parse_tajmobile():
     # ВНИМАНИЕ: Замените path=20 на ваш ID категории смартфонов на Tajmobile!
-    base_url = "https://tajmobile.tj/index.php?route=product/category&path=20&page={}"
+        base_url = "https://tajmobile.tj/index.php?route=product/category&path=57_48&page={}"
     headers = {"user-agent": "Mozilla/5.0", "x-requested-with": "XMLHttpRequest"}
     products = []
     
