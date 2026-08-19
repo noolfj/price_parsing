@@ -1,105 +1,162 @@
 import streamlit as st
 import requests
-import pandas as pd
+from bs4 import BeautifulSoup
 import time
+import pandas as pd
 from io import BytesIO
+import urllib3
 
-CITIES = {
-    "Душанбе": 1,
-    "Худжанд": 2
-}
+# Отключаем предупреждения SSL для Obbo
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-CATEGORIES = {
-    "Смартфоны": "smartfony",
-    "Бытовая техника": "bytovaya-tehnika"
-}
+# --- НАСТРОЙКИ ИНТЕРФЕЙСА ---
+st.set_page_config(page_title="Парсер цен TJ", page_icon="🛒", layout="wide")
+st.title("🛒 Агрегатор цен: Alifshop, Tajmobile, Obbo")
+st.write("Выберите источники, категорию и город (для Alifshop), затем нажмите кнопку для запуска.")
 
-st.title("🛒 Alifshop parser")
-st.write("Выберите параметры и нажмите кнопку, чтобы скачать Excel-файл с товарами.")
+# --- ЭЛЕМЕНТЫ УПРАВЛЕНИЯ ---
+col1, col2, col3 = st.columns(3)
 
-col1, col2 = st.columns(2)
 with col1:
-    city_name = st.selectbox("Выберите город:", list(CITIES.keys()))
+    st.subheader("1. Выберите магазины")
+    use_alif = st.checkbox("Alifshop", value=True)
+    use_tajmobile = st.checkbox("Tajmobile", value=False)
+    use_obbo = st.checkbox("Obbo", value=True)
+
 with col2:
-    category_name = st.selectbox("Выберите категорию:", list(CATEGORIES.keys()))
+    st.subheader("2. Выберите категорию")
+    # Пока используем только смартфоны, так как для Tajmobile и Obbo нужны точные URL/ID для других категорий
+    category_name = st.selectbox("Категория:", ["Смартфоны"]) 
 
-# Кнопка старта
-if st.button("Начать парсинг", type="primary"):
-    city_id = CITIES[city_name]
-    category_slug = CATEGORIES[category_name]
+with col3:
+    st.subheader("3. Город (для Alifshop)")
+    city_name = st.selectbox("Город:", ["Душанбе", "Худжанд"])
+    city_id = 1 if city_name == "Душанбе" else 2
+
+# Кнопка запуска
+start_button = st.button("🚀 Начать парсинг", type="primary", use_container_width=True)
+
+# --- ФУНКЦИИ ПАРСИНГА ---
+
+def parse_alifshop(cat_slug, c_id):
+    url = "https://api.alifshop.tj/service_product/products"
+    headers = {"accept": "application/json", "user-agent": "Mozilla/5.0", "referer": "https://alifshop.tj/"}
+    params = {"city_id": c_id, "limit": 100, "page": 1, "category_slug": cat_slug, "sort_type": "desc_by_popularity", "search": ""}
     
-    progress_bar = st.progress(0, text="Подготовка к парсингу...")
-    status_text = st.empty()
+    products = []
+    while True:
+        resp = requests.get(url, headers=headers, params=params).json()
+        items = resp.get("response", {}).get("products", {}).get("items", [])
+        if not items: break
+        for item in items:
+            products.append({
+                "Магазин": "Alifshop",
+                "Название": item.get("name", ""),
+                "Цена": str(item.get("final_price") or item.get("min_price") or "0"),
+                "Ссылка": f"https://alifshop.tj/product/{item.get('slug', '')}"
+            })
+        params["page"] += 1
+        time.sleep(0.5)
+    return products
 
-    all_products = []
+def parse_tajmobile():
+    base_url = "https://tajmobile.tj/index.php?route=product/catalog&page={}"
+    headers = {"user-agent": "Mozilla/5.0", "x-requested-with": "XMLHttpRequest"}
+    products = []
+    for page in range(1, 10): # Парсим 10 страниц
+        resp = requests.get(base_url.format(page), headers=headers)
+        if resp.status_code != 200: break
+        soup = BeautifulSoup(resp.text, 'lxml')
+        items = soup.select('.product-thumb') or soup.select('.product-layout')
+        if not items: break
+        for item in items:
+            name_tag = item.select_one('.caption h4 a') or item.select_one('.name a')
+            price_tag = item.select_one('.price .price-new') or item.select_one('.price')
+            if name_tag and price_tag:
+                products.append({
+                    "Магазин": "Tajmobile",
+                    "Название": name_tag.text.strip(),
+                    "Цена": price_tag.text.strip().replace('с.', '').replace(' ', '').split('.')[0],
+                    "Ссылка": name_tag.get('href', '')
+                })
+        time.sleep(1)
+    return products
+
+def parse_obbo():
+    api_url = "https://obbo.tj/api/products"
+    auth = ("firdavsjuraev8@gmail.com", "a9b5NgNa33h3jn2z04t1cR706zyb4B73")
+    headers = {"User-Agent": "Mozilla/5.0"}
+    products = []
     page = 1
+    while True:
+        params = {"status": "A", "items_per_page": 100, "page": page}
+        response = requests.get(api_url, auth=auth, headers=headers, params=params, verify=False)
+        if response.status_code != 200: break
+        data = response.json()
+        items = data.get("products", [])
+        if isinstance(items, dict): items = list(items.values())
+        if not items: break
+        for item in items:
+            products.append({
+                "Магазин": "Obbo",
+                "Название": item.get("product", ""),
+                "Цена": str(item.get("price", "0")),
+                "Ссылка": f"https://obbo.tj/index.php?dispatch=products.view&product_id={item.get('product_id', '')}"
+            })
+        page += 1
+        time.sleep(0.5)
+    return products
 
-    with st.spinner(f'Парсинг категории "{category_name}" в городе "{city_name}"...'):
-        while True:
-            api_url = "https://api.alifshop.tj/service_product/products"
-            headers = {
-                "accept": "application/json, text/plain, */*",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-                "referer": "https://alifshop.tj/"
-            }
-            params = {
-                "city_id": city_id,
-                "limit": 100,
-                "search": "",
-                "page": page,
-                "sort_type": "desc_by_popularity",
-                "category_slug": category_slug
-            }
-            
-            try:
-                response = requests.get(api_url, headers=headers, params=params)
-                if response.status_code != 200:
-                    st.error(f"Ошибка сервера: {response.status_code}")
-                    break
-                    
-                data = response.json()
-                products = data.get("response", {}).get("products", {}).get("items", [])
-                
-                if not products:
-                    break
-                    
-                for item in products:
-                    all_products.append({
-                        "Название": item.get("name", ""),
-                        "Цена": item.get("final_price") or item.get("min_price") or "",
-                        "Ссылка": f"https://alifshop.tj/product/{item.get('slug', '')}",
-                        "Картинка": item.get("images", [""])[0] if item.get("images") else ""
-                    })
-                
-                progress_text = f'Спарсено товаров: {len(all_products)} (Страница {page})...'
-                progress_bar.progress(50, text=progress_text)
-                status_text.text(progress_text)
-                
-                page += 1
-                time.sleep(1) 
-            except Exception as e:
-                st.error(f"Произошла ошибка: {e}")
-                break
-
-    if all_products:
-        progress_bar.progress(100, text="Готово!")
-        st.success(f"Успешно спарсено {len(all_products)} товаров!")
-        
-        df = pd.DataFrame(all_products)
-        
-        st.write("Предпросмотр данных:")
-        st.dataframe(df.head(50))
-        
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name=category_name[:31])
-        output.seek(0)
-        
-        st.download_button(
-            label="⬇️ Скачать Excel файл",
-            data=output,
-            file_name=f"alifshop_{category_slug}_{city_id}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+# --- ЛОГИКА КНОПКИ ---
+if start_button:
+    if not (use_alif or use_tajmobile or use_obbo):
+        st.error("Пожалуйста, выберите хотя бы один магазин!")
     else:
-        st.warning("Товары не найдены.")
+        all_data = []
+        progress_text = st.empty()
+        
+        with st.spinner('Собираем данные... Это может занять около минуты.'):
+            if use_alif:
+                progress_text.text("📱 Парсинг Alifshop...")
+                all_data.extend(parse_alifshop("smartfony", city_id))
+            
+            if use_tajmobile:
+                progress_text.text("📱 Парсинг Tajmobile...")
+                all_data.extend(parse_tajmobile())
+                
+            if use_obbo:
+                progress_text.text("📱 Парсинг Obbo...")
+                all_data.extend(parse_obbo())
+
+        if all_data:
+            progress_text.success(f"✅ Готово! Собрано товаров: {len(all_data)}")
+            
+            # Создаем DataFrame
+            df = pd.DataFrame(all_data)
+            
+            # Очищаем цены для Excel (оставляем только цифры)
+            df['Цена'] = df['Цена'].astype(str).str.replace(' ', '').str.extract(r'(\d+)')[0]
+            df['Цена'] = pd.to_numeric(df['Цена'], errors='coerce').fillna(0).astype(int)
+            
+            # Сортируем по названию (чтобы одинаковые телефоны были рядом)
+            df = df.sort_values(by=["Название", "Цена"])
+            
+            st.subheader("📊 Предпросмотр данных")
+            st.dataframe(df, use_container_width=True, height=500)
+            
+            # Генерация Excel файла в памяти
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Сравнение цен')
+            output.seek(0)
+            
+            st.subheader("⬇️ Скачать результат")
+            st.download_button(
+                label="Скачать Excel файл",
+                data=output,
+                file_name=f"phones_comparison_{city_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        else:
+            st.warning("Товары не найдены. Попробуйте изменить параметры поиска.")
