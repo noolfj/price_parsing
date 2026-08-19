@@ -60,19 +60,15 @@ def parse_alifshop(cat_slug, c_id):
     return products
 
 def parse_tajmobile():
-    # ВНИМАНИЕ: Замените path=20 на ваш ID категории смартфонов на Tajmobile!
-        base_url = "https://tajmobile.tj/index.php?route=product/category&path=57_48&page={}"
+    base_url = "https://tajmobile.tj/index.php?route=product/catalog&page={}"
     headers = {"user-agent": "Mozilla/5.0", "x-requested-with": "XMLHttpRequest"}
     products = []
-    
-    for page in range(1, 15):
+    for page in range(1, 10): # Парсим 10 страниц
         resp = requests.get(base_url.format(page), headers=headers)
         if resp.status_code != 200: break
-        
         soup = BeautifulSoup(resp.text, 'lxml')
         items = soup.select('.product-thumb') or soup.select('.product-layout')
         if not items: break
-            
         for item in items:
             name_tag = item.select_one('.caption h4 a') or item.select_one('.name a')
             price_tag = item.select_one('.price .price-new') or item.select_one('.price')
