@@ -4,7 +4,6 @@ import pandas as pd
 import time
 from io import BytesIO
 
-# --- ДАННЫЕ ДЛЯ ВЫПАДАЮЩИХ СПИСКОВ ---
 CITIES = {
     "Душанбе": 1,
     "Худжанд": 2
@@ -15,8 +14,7 @@ CATEGORIES = {
     "Бытовая техника": "bytovaya-tehnika"
 }
 
-# --- НАСТРОЙКА ИНТЕРФЕЙСА ---
-st.title("🛒 Alif Shop Web Parser")
+st.title("🛒 Alifshop parser")
 st.write("Выберите параметры и нажмите кнопку, чтобы скачать Excel-файл с товарами.")
 
 col1, col2 = st.columns(2)
@@ -73,13 +71,12 @@ if st.button("Начать парсинг", type="primary"):
                         "Картинка": item.get("images", [""])[0] if item.get("images") else ""
                     })
                 
-                # Обновляем прогресс и текст
                 progress_text = f'Спарсено товаров: {len(all_products)} (Страница {page})...'
                 progress_bar.progress(50, text=progress_text)
                 status_text.text(progress_text)
                 
                 page += 1
-                time.sleep(1) # Пауза, чтобы не забанели
+                time.sleep(1) 
             except Exception as e:
                 st.error(f"Произошла ошибка: {e}")
                 break
@@ -88,20 +85,16 @@ if st.button("Начать парсинг", type="primary"):
         progress_bar.progress(100, text="Готово!")
         st.success(f"Успешно спарсено {len(all_products)} товаров!")
         
-        # Создаем DataFrame
         df = pd.DataFrame(all_products)
         
-        # Показываем таблицу прямо на сайте (первые 50 строк)
         st.write("Предпросмотр данных:")
         st.dataframe(df.head(50))
         
-        # Создаем Excel файл прямо в оперативной памяти (чтобы дать скачать)
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name=category_name[:31])
         output.seek(0)
         
-        # Кнопка для скачивания файла
         st.download_button(
             label="⬇️ Скачать Excel файл",
             data=output,
